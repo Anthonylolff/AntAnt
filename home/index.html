@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="zh-HK">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0b1220">
+<title>家居 3D</title>
+<style>
+:root{
+  --chrome:#0b1220;--chrome2:#121b2e;--chrome3:#1a2540;--line:#24314f;--ink:#e7ecf5;--mut:#8c99b3;--acc:#22d3ee;--accink:#04212a;
+  --bad:#ff6b6b;--warn:#f5b041;--ok:#3ddc84;
+  --grid:rgba(120,160,230,.22);--grid2:rgba(120,160,230,.08);--wall:#cfe0ff;--bg2d:#0f1729;--devbg:#2b3a5c;--roomop:.32;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;background:var(--chrome);color:var(--ink);font:14px/1.45 -apple-system,BlinkMacSystemFont,"PingFang HK","Noto Sans TC","Microsoft JhengHei",sans-serif;-webkit-font-smoothing:antialiased;overflow:hidden}
+button,input,select,textarea{font:inherit;color:inherit}
+button{cursor:pointer}
+[hidden]{display:none!important}
+#app{display:flex;flex-direction:column;height:100%;height:100dvh}
+
+/* ---------- header ---------- */
+header{display:flex;align-items:center;gap:10px;padding:10px 14px;background:var(--chrome);border-bottom:1px solid var(--line);flex:none}
+.brand{font-weight:700;letter-spacing:.01em;font-size:15px;white-space:nowrap}
+.brand small{color:var(--mut);font-weight:500;margin-left:6px;font-size:11px}
+.tabs{display:flex;gap:4px}
+.tab{border:0;background:transparent;color:var(--mut);padding:6px 12px;border-radius:999px;font-size:13px}
+.tab.on{background:var(--acc);color:var(--accink);font-weight:600}
+.spacer{flex:1}
+.hastat{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--mut);border:1px solid var(--line);border-radius:999px;padding:4px 10px;background:var(--chrome2)}
+.hastat i{width:8px;height:8px;border-radius:50%;background:var(--mut)}
+.hastat.ok i{background:var(--ok);box-shadow:0 0 8px var(--ok)}.hastat.demo i{background:var(--warn)}.hastat.err i{background:var(--bad)}
+.iconbtn{border:1px solid var(--line);background:var(--chrome2);border-radius:10px;width:34px;height:34px;display:inline-flex;align-items:center;justify-content:center;font-size:15px}
+
+/* ---------- chips bar ---------- */
+.chipbar{display:flex;align-items:center;gap:6px;padding:8px 14px;background:var(--chrome);border-bottom:1px solid var(--line);overflow-x:auto;flex:none;scrollbar-width:none}
+.chipbar::-webkit-scrollbar{display:none}
+.chip{border:1px solid var(--line);background:var(--chrome2);color:var(--ink);padding:5px 12px;border-radius:999px;font-size:12.5px;white-space:nowrap}
+.chip.on{background:var(--acc);border-color:var(--acc);color:var(--accink);font-weight:600}
+.chip.sep{border:0;background:transparent;padding:0 2px;color:var(--line)}
+.search{position:relative;margin-left:auto;flex:none}
+.search input{width:170px;border:1px solid var(--line);background:var(--chrome2);border-radius:999px;padding:5px 30px 5px 12px;font-size:12.5px;outline:none}
+.search input:focus{border-color:var(--acc)}
+.search .mic{position:absolute;right:4px;top:50%;transform:translateY(-50%);border:0;background:transparent;font-size:14px;padding:2px 6px}
+.sres{position:fixed;z-index:80;background:var(--chrome2);border:1px solid var(--line);border-radius:12px;min-width:240px;max-height:50vh;overflow:auto;box-shadow:0 12px 30px rgba(0,0,0,.4)}
+.sres button{display:flex;gap:8px;width:100%;text-align:left;border:0;background:transparent;padding:8px 12px;font-size:13px}
+.sres button:hover,.sres button.on{background:var(--chrome3)}
+.sres small{color:var(--mut);margin-left:auto}
+
+/* ---------- main ---------- */
+main{flex:1;min-height:0;position:relative;display:flex}
+.page{flex:1;min-width:0;display:flex;position:relative}
+#p3d{flex-direction:column}
+.v3host{position:relative;flex:1;min-width:0;min-height:0;overflow:hidden}
+.v3-canvas{position:absolute;inset:0;width:100%;height:100%;display:block;touch-action:none}
+.v3-overlay{position:absolute;inset:0;pointer-events:none;overflow:hidden}
+.v3-label{position:absolute;left:0;top:0;pointer-events:auto;border:0;white-space:nowrap;will-change:transform}
+.v3-room{background:rgba(12,18,32,.82);color:#fff;font-size:11.5px;font-weight:600;padding:3px 9px;border-radius:999px;border:1px solid rgba(255,255,255,.18);backdrop-filter:blur(4px)}
+.v3-room.on{background:var(--acc);color:var(--accink)}
+.v3-dev{display:flex;align-items:center;gap:3px;background:rgba(18,26,46,.85);color:#fff;border-radius:999px;padding:2px;font-size:11px;border:1.5px solid rgba(255,255,255,.25);min-width:24px;height:24px;justify-content:center}
+.v3-dev i{font-style:normal;font-size:12px;width:18px;text-align:center}
+.v3-dev b{font-weight:600;padding-right:6px}
+.v3-dev.on{background:#ffb347;color:#2a1600;border-color:#ffe2b0;box-shadow:0 0 12px rgba(255,179,71,.7)}
+.v3-dev.sel{outline:2px solid var(--acc);outline-offset:2px}
+.light-ui .v3-room{background:rgba(255,255,255,.9);color:#1d2433;border-color:rgba(0,0,0,.1)}
+.light-ui .v3-dev{background:rgba(255,255,255,.92);color:#1d2433;border-color:rgba(0,0,0,.12)}
+.light-ui .v3-dev.on{background:#ffb347;color:#2a1600}
+
+.ov{position:absolute;z-index:5;display:flex;gap:6px;flex-wrap:wrap}
+.pill{display:flex;flex-direction:column;background:rgba(12,18,32,.82);border:1px solid rgba(255,255,255,.12);border-radius:10px;padding:4px 10px;min-width:64px;backdrop-filter:blur(6px);color:#fff}
+.pill small{font-size:9.5px;color:#9fb0cf;line-height:1.2}
+.pill b{font-size:13px;line-height:1.25}
+.pill.solar b{color:#ffd166}.pill.grid b{color:#7fb2ff}.pill.batt b{color:#3ddc84}
+.obtn{white-space:nowrap;border:1px solid rgba(255,255,255,.14);background:rgba(12,18,32,.82);color:#fff;border-radius:999px;padding:7px 13px;font-size:12.5px;backdrop-filter:blur(6px)}
+.obtn.on{background:var(--acc);color:var(--accink);border-color:var(--acc)}
+.light-ui .pill,.light-ui .obtn:not(.on){background:rgba(255,255,255,.88);color:#1d2433;border-color:rgba(0,0,0,.1)}
+.light-ui .pill small{color:#66718a}
+.pop{position:absolute;z-index:20;background:var(--chrome2);border:1px solid var(--line);border-radius:14px;padding:12px;box-shadow:0 18px 40px rgba(0,0,0,.45)}
+.themes{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;width:min(420px,calc(100vw - 32px))}
+.thm{border:1px solid var(--line);border-radius:10px;padding:0;overflow:hidden;background:var(--chrome3);text-align:left}
+.thm span{display:block;height:38px}
+.thm b{display:block;font-size:12px;padding:5px 8px 0}
+.thm small{display:block;font-size:10.5px;color:var(--mut);padding:0 8px 6px}
+.thm.on{outline:2px solid var(--acc)}
+.timepop{width:min(420px,calc(100vw - 32px))}
+.timepop input[type=range]{width:100%}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.mut{color:var(--mut);font-size:12px}
+
+/* ---------- side panel (room/device) ---------- */
+.side{position:absolute;right:12px;top:12px;bottom:12px;width:min(340px,calc(100% - 24px));z-index:15;background:rgba(14,21,38,.94);border:1px solid var(--line);border-radius:16px;backdrop-filter:blur(10px);display:flex;flex-direction:column;box-shadow:0 18px 40px rgba(0,0,0,.4)}
+.side-h{display:flex;align-items:center;gap:8px;padding:12px 14px;border-bottom:1px solid var(--line)}
+.side-h b{font-size:15px;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis}
+.side-b{overflow:auto;padding:10px 12px 16px;flex:1}
+.ctl{background:var(--chrome3);border:1px solid var(--line);border-radius:12px;padding:9px 10px;margin-bottom:8px}
+.ctl-h{display:flex;align-items:center;gap:8px}
+.ctl-h i{font-style:normal;width:22px;text-align:center}
+.ctl-h b{flex:1;font-weight:600;font-size:13px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ctl-h small{color:var(--mut);font-size:11px}
+.ctl-tog{width:42px;height:24px;border-radius:999px;border:0;background:#33405f;position:relative;flex:none}
+.ctl-tog span{position:absolute;left:3px;top:3px;width:18px;height:18px;border-radius:50%;background:#fff;transition:left .15s}
+.ctl-tog.on{background:#ffb347}.ctl-tog.on span{left:21px}
+.ctl-row{display:flex;align-items:center;gap:10px;font-size:12px;color:var(--mut);margin-top:8px}
+.ctl-row input{flex:1;accent-color:var(--acc)}
+.ctl-row input.ct{accent-color:#ffb347}
+.ctl-sw{display:flex;gap:6px;margin-top:8px}
+.ctl-sw button{width:22px;height:22px;border-radius:50%;border:2px solid rgba(255,255,255,.3)}
+.ctl-btns{display:flex;gap:6px;margin-top:8px;flex-wrap:wrap}
+.ctl-btns button,.ctl-run{border:1px solid var(--line);background:var(--chrome2);border-radius:8px;padding:5px 10px;font-size:12px}
+.ctl-btns button.on{background:var(--acc);color:var(--accink);border-color:var(--acc)}
+.ctl-temp{display:flex;align-items:center;gap:10px;margin-top:8px}
+.ctl-temp button{width:32px;height:32px;border-radius:50%;border:1px solid var(--line);background:var(--chrome2);font-size:16px}
+.ctl-temp b{font-size:20px}
+.ctl-temp small{color:var(--mut);margin-left:auto;font-size:11px}
+.ctl-val{font-weight:600;font-size:13px}
+.ctl-note{font-size:11.5px;color:var(--mut);margin-top:6px}
+.ctl-cam{margin-top:8px;border-radius:8px;overflow:hidden;background:#000;aspect-ratio:16/9;position:relative}
+.ctl-cam img{width:100%;height:100%;object-fit:cover;display:block}
+.ctl-cam span{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:12px;color:#aaa}
+.ctl-cam img[src]+span{display:none}
+.hint{font-size:12px;color:var(--mut);line-height:1.5}
+
+/* ---------- editor ---------- */
+#pedit{flex-direction:column}
+.toolbar{display:flex;align-items:center;gap:4px;padding:6px 10px;border-bottom:1px solid var(--line);background:var(--chrome);overflow-x:auto;flex:none;scrollbar-width:none}
+.tb{border:1px solid transparent;background:transparent;color:var(--ink);border-radius:8px;padding:5px 10px;font-size:12.5px;white-space:nowrap}
+.tb:hover{background:var(--chrome2)}
+.tb.on{background:var(--acc);color:var(--accink);font-weight:600}
+.tb[disabled]{opacity:.4}
+.tbsep{width:1px;height:20px;background:var(--line);margin:0 4px;flex:none}
+.edbody{flex:1;min-height:0;display:flex}
+#edhost{flex:1.15;min-width:0;position:relative;background:var(--bg2d)}
+#edhost .ed-hint{position:absolute;left:10px;bottom:8px;font-size:11px;color:var(--mut);pointer-events:none;background:rgba(15,23,41,.8);padding:3px 8px;border-radius:6px}
+.ed-svg{width:100%;height:100%;display:block;touch-action:none;user-select:none;-webkit-user-select:none}
+.ed-svg[data-tool=room],.ed-svg[data-tool=wall],.ed-svg[data-tool=door],.ed-svg[data-tool=window],.ed-svg[data-tool=opening],.ed-svg[data-tool=pick]{cursor:crosshair}
+.ed-room{fill-opacity:var(--roomop);cursor:move}
+.ed-wall{cursor:move}.ed-item{cursor:grab}.ed-dev{cursor:grab}.ed-op{cursor:ew-resize}
+.ed-txt{fill:#e7ecf5;font-family:inherit}
+.ed-rn{font-weight:700}.halo{paint-order:stroke;stroke:rgba(15,23,41,.85);stroke-linejoin:round}.ed-ra{fill:#9fb0cf}.ed-it{fill:#1d2433;font-weight:600}
+.ed-dim{fill:var(--acc);font-weight:700;paint-order:stroke;stroke:#0f1729}
+.ed-h{fill:#fff;stroke:var(--acc);stroke-width:2px;vector-effect:non-scaling-stroke;cursor:grab}
+.ed-mid{fill:var(--acc);stroke:#fff}.ed-plus{fill:var(--accink);font-weight:800}
+.ed-rot{fill:var(--acc)}
+#edside3d{flex:1;min-width:0;border-left:1px solid var(--line);position:relative;display:flex}
+.insp{width:290px;flex:none;border-left:1px solid var(--line);background:var(--chrome);overflow:auto;padding:12px 12px 40px}
+.insp h4{margin:14px 0 6px;font-size:11px;color:var(--mut);font-weight:600;letter-spacing:.06em;text-transform:uppercase}
+.insp h4:first-child{margin-top:0}
+.insp .ttl{font-size:15px;font-weight:700;margin-bottom:6px;display:flex;align-items:center;gap:8px}
+.fld{display:flex;flex-direction:column;gap:3px;margin:7px 0}
+.fld>span{font-size:11px;color:var(--mut)}
+.fld input,.fld select,.fld textarea{width:100%;border:1px solid var(--line);background:var(--chrome2);border-radius:8px;padding:6px 8px;font-size:13px;outline:none;min-width:0}
+.fld input:focus,.fld select:focus{border-color:var(--acc)}
+.fld input[type=color]{padding:2px;height:32px}
+.fld input[type=checkbox]{width:auto}
+.fld2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.btn{border:1px solid var(--line);background:var(--chrome2);border-radius:8px;padding:6px 11px;font-size:12.5px}
+.btn.pri{background:var(--acc);border-color:var(--acc);color:var(--accink);font-weight:600}
+.btn.danger{color:var(--bad)}
+.btns{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.palette{display:grid;grid-template-columns:repeat(3,1fr);gap:5px}
+.palette button{border:1px solid var(--line);background:var(--chrome2);border-radius:8px;padding:6px 4px;font-size:11.5px}
+.palette h5{grid-column:1/-1;margin:8px 0 0;font-size:10.5px;color:var(--mut);font-weight:600}
+.chk{display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:8px;font-size:13px;border:0;background:transparent;width:100%;text-align:left}
+.chk:hover{background:var(--chrome2)}
+.chk i{font-style:normal;width:18px}
+.chk small{margin-left:auto;color:var(--mut)}
+.prog{height:6px;background:var(--chrome3);border-radius:4px;overflow:hidden;margin:6px 0}
+.prog span{display:block;height:100%;background:var(--ok)}
+
+/* ---------- import / settings pages ---------- */
+.scroll{flex:1;overflow:auto}
+.wrap{max-width:860px;margin:0 auto;padding:22px 18px 60px}
+.wrap h2{font-size:20px;margin:0 0 4px}
+.wrap>p.lead{color:var(--mut);margin:0 0 16px}
+.drop{display:block;cursor:pointer;border:1.5px dashed #2f4677;border-radius:16px;padding:34px 18px;text-align:center;background:var(--chrome2);transition:.15s}
+.drop.over{border-color:var(--acc);background:#10233a}
+.drop b{font-size:16px;display:block;margin-bottom:6px}
+.fmts{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px;margin:16px 0}
+.card{background:var(--chrome2);border:1px solid var(--line);border-radius:14px;padding:12px 14px}
+.card small{color:var(--acc);font-size:11px;font-weight:600}
+.card b{display:block;margin:2px 0}
+.card p{margin:0;color:var(--mut);font-size:12.5px}
+details{background:var(--chrome2);border:1px solid var(--line);border-radius:12px;padding:10px 14px;margin:8px 0}
+details summary{cursor:pointer;font-weight:600;font-size:13.5px}
+details ol,details ul{margin:8px 0 2px;padding-left:20px;color:var(--mut);font-size:13px}
+details code,.wrap code{background:var(--chrome3);padding:1px 5px;border-radius:5px;font-size:12px}
+.result{margin-top:16px}
+.result .stats{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0}
+.result .stats div{background:var(--chrome3);border-radius:10px;padding:6px 12px;font-size:12px;color:var(--mut)}
+.result .stats b{display:block;color:var(--ink);font-size:18px}
+.warns{margin:8px 0;padding:0;list-style:none}
+.warns li{font-size:12.5px;padding:6px 10px;border-radius:8px;background:#2a2412;color:#f5d48a;margin:4px 0}
+.beta{display:inline-block;background:var(--warn);color:#2a1a00;font-size:10px;font-weight:700;padding:1px 6px;border-radius:5px;vertical-align:middle}
+.set h3{margin:22px 0 8px;font-size:15px}
+.set .card{margin:8px 0}
+.toast{position:fixed;left:50%;bottom:22px;transform:translateX(-50%) translateY(20px);background:#1d2a47;border:1px solid var(--line);color:#fff;padding:8px 16px;border-radius:999px;font-size:13px;opacity:0;transition:.2s;pointer-events:none;z-index:200;max-width:90vw}
+.toast.show{opacity:1;transform:translateX(-50%)}
+.toast.err{background:#4a1d24}
+
+@media (max-width:900px){
+  .insp{width:250px}
+  #edside3d{display:none}
+  .edbody.with3d #edside3d{display:flex;position:absolute;right:250px;bottom:0;width:45%;height:45%;border:1px solid var(--line);z-index:4}
+}
+@media (max-width:640px){
+  header{padding:8px 10px;gap:6px}
+  .brand small{display:none}
+  .tab{padding:5px 9px}
+  .hastat span{display:none}
+  .search input{width:120px}
+  .edbody{flex-direction:column}
+  .insp{width:auto;border-left:0;border-top:1px solid var(--line);height:42%;flex:none}
+  .edbody.with3d #edside3d{left:auto;right:8px;width:55%;bottom:calc(42% + 8px);height:30%;border-radius:12px;overflow:hidden}
+  .side{top:auto;height:62%;left:8px;right:8px;width:auto;bottom:8px}
+  .ov.br{bottom:10px}
+  #viewbtns{top:auto!important;bottom:62px;right:10px;flex-direction:column;align-items:flex-end}
+  #energy{right:10px}
+  .pill{min-width:0;padding:3px 8px}
+  .obtn{white-space:nowrap}
+}
+</style>
+<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"}}</script>
+</head>
+<body>
+<div id="app">
+  <header>
+    <div class="brand">家居 3D<small>v1.0</small></div>
+    <nav class="tabs" id="tabs">
+      <button class="tab on" data-p="p3d">3D</button>
+      <button class="tab" data-p="pedit">編輯</button>
+      <button class="tab" data-p="pimport">匯入</button>
+      <button class="tab" data-p="pset">設定</button>
+    </nav>
+    <div class="spacer"></div>
+    <button class="hastat" id="hastat" title="Home Assistant 連線"><i></i><span>示範</span></button>
+    <a class="iconbtn" href="../" title="返單位平面圖" style="text-decoration:none">⌂</a>
+  </header>
+  <div class="chipbar" id="chipbar">
+    <div id="floorchips" style="display:flex;gap:6px"></div>
+    <span class="chip sep">|</span>
+    <div id="roomchips" style="display:flex;gap:6px"></div>
+    <div class="search"><input id="q" placeholder="搵嘢：洗衣機、主人房…" autocomplete="off"><button class="mic" id="mic" title="講嘢搵">🎙</button></div>
+  </div>
+  <main>
+    <!-- 3D -->
+    <section class="page" id="p3d">
+      <div id="slot3d" style="flex:1;display:flex;min-height:0;position:relative"></div>
+      <div class="ov" id="energy" style="left:12px;top:12px"></div>
+      <div class="ov" style="right:12px;top:12px" id="viewbtns">
+        <button class="obtn" data-view="all">⌂ 全屋</button>
+        <button class="obtn" data-view="top">頂視</button>
+        <button class="obtn" id="bcut">半高牆</button>
+        <button class="obtn" id="bdev">裝置</button>
+      </div>
+      <div class="ov br" style="left:50%;bottom:16px;transform:translateX(-50%);flex-wrap:nowrap">
+        <button class="obtn" id="bstyle">🎨 風格</button>
+        <button class="obtn" id="btime">☀ 日照時光</button>
+        <button class="obtn" id="bshot" title="影相">📸</button>
+      </div>
+      <div class="pop" id="stylepop" hidden style="left:50%;bottom:60px;transform:translateX(-50%)"></div>
+      <div class="pop timepop" id="timepop" hidden style="left:50%;bottom:60px;transform:translateX(-50%)">
+        <div class="row" style="justify-content:space-between"><b id="tlabel">而家</b><span class="mut" id="tsun"></span></div>
+        <input type="range" id="tslider" min="0" max="1439" step="5" style="margin:10px 0">
+        <div class="row"><input type="date" id="tdate" class="btn"><button class="btn" id="tnow">返而家</button><button class="btn" id="tplay">▶ 播一日</button>
+        <label class="mut" style="margin-left:auto"><input type="checkbox" id="tauto"> 日夜自動換風格</label></div>
+      </div>
+      <aside class="side" id="side" hidden>
+        <div class="side-h"><b id="sidet"></b><button class="iconbtn" id="sidex">✕</button></div>
+        <div class="side-b" id="sideb"></div>
+      </aside>
+    </section>
+
+    <!-- 編輯 -->
+    <section class="page" id="pedit" hidden>
+      <div class="toolbar" id="toolbar">
+        <button class="tb on" data-tool="select">↖ 選取</button>
+        <button class="tb" data-tool="room">▭ 房間</button>
+        <button class="tb" data-tool="wall">╱ 牆</button>
+        <button class="tb" data-tool="door">🚪 門</button>
+        <button class="tb" data-tool="window">🪟 窗</button>
+        <button class="tb" data-tool="opening">⬚ 開口</button>
+        <button class="tb" data-x="furn">🛋 傢俬</button>
+        <button class="tb" data-x="dev">💡 裝置</button>
+        <span class="tbsep"></span>
+        <button class="tb" id="undo" title="Ctrl+Z">↶</button>
+        <button class="tb" id="redo" title="Ctrl+Shift+Z">↷</button>
+        <button class="tb" id="fit">⤢ 置中</button>
+        <span class="tbsep"></span>
+        <button class="tb on" id="tog3d">3D 喺隔籬</button>
+        <label class="tb" style="display:flex;gap:5px;align-items:center"><input type="checkbox" id="autow" checked>自動起牆</label>
+      </div>
+      <div class="edbody with3d" id="edbody">
+        <div id="edhost"><div class="ed-hint" id="edhint">撳房間揀 · 拖角改形 · 「+」加角 · 拖空白位移動 · 滾輪縮放</div></div>
+        <div id="edside3d"></div>
+        <aside class="insp" id="insp"></aside>
+      </div>
+    </section>
+
+    <!-- 匯入 -->
+    <section class="page" id="pimport" hidden><div class="scroll"><div class="wrap">
+      <h2>匯入平面圖 <span class="beta">BETA</span></h2>
+      <p class="lead">由其他程式或者掃描帶入房、牆、門窗、傢俬。檔案只喺你部機嘅瀏覽器處理，唔會上傳。</p>
+      <label class="drop" id="drop"><b>拖個檔落嚟，或者撳一下揀檔</b>
+        <span class="mut">iPhone/iPad RoomPlan 掃描 (.json) · CAD (.dxf) · Sweet Home 3D (.sh3d) · 3D 模型 (.glb .gltf .obj .stl) · Valetudo 掃地機地圖 (.json) · 本 app 或 AI 寫嘅 plan (.json)</span>
+        <input type="file" id="file" hidden accept=".json,.dxf,.sh3d,.glb,.gltf,.obj,.stl,.zip,.txt">
+      </label>
+      <div class="result" id="result"></div>
+      <div class="fmts">
+        <div class="card"><small>最快</small><b>iPhone 掃描</b><p>有 LiDAR 嘅 iPhone / iPad，用 RoomPlan 掃一圈</p></div>
+        <div class="card"><small>有圖紙</small><b>CAD</b><p>設計師或者物業畀嘅 DXF</p></div>
+        <div class="card"><small>有模型</small><b>3D 模型</b><p>Blender、SketchUp 匯出嘅 glb / obj / stl</p></div>
+        <div class="card"><small>土辦法</small><b>掃地機地圖</b><p>Valetudo 匯出嘅地圖 JSON</p></div>
+      </div>
+      <h3 style="font-size:15px;margin:20px 0 6px">點樣匯出…</h3>
+      <details><summary>iPhone / iPad（RoomPlan，要有 LiDAR：Pro 系列 iPhone 12 起、iPad Pro 2020 起）</summary>
+        <ol><li>用支援 RoomPlan 匯出 JSON 嘅 App（例如 Apple 嘅 RoomPlan 範例 App，或者其他標明「CapturedRoom JSON」嘅掃描 App）</li>
+        <li>逐間房慢慢行一圈，鏡頭對住牆角同門窗</li><li>匯出 <code>.json</code>（唔係 .usdz），AirDrop 去電腦或者直接喺 iPad 開呢頁揀檔</li>
+        <li>匯入後去「編輯」逐間房核對：牆厚、門口闊、窗台高</li></ol></details>
+      <details><summary>CAD / AutoCAD / 中望 / DraftSight</summary>
+        <ol><li>另存為 <code>DXF</code>（R12 至 2018 都得）</li><li>牆最好喺 <code>WALL</code> / <code>牆</code> 圖層；房間用閉合多段線放喺 <code>ROOM</code> 圖層，房名用文字放入房</li>
+        <li>門用名有 <code>DOOR</code>／<code>門</code> 嘅圖塊，或者普通門弧都認得</li><li>原本嘅線會變底圖，方便你對住改</li></ol></details>
+      <details><summary>Sweet Home 3D</summary><ol><li>直接揀 <code>.sh3d</code> 檔（5.3 版或以上存嘅）</li><li>樓層、牆、房、門窗、傢俬都會帶入</li></ol></details>
+      <details><summary>Blender / SketchUp / 其他 3D</summary><ol><li>匯出 <code>.glb</code>（最好）或者 <code>.obj</code> / <code>.stl</code></li><li>模型會變半透明參考，同埋由頂影一張底圖畀你用「房間」工具描</li></ol></details>
+      <details><summary>Valetudo 掃地機</summary><ol><li>Valetudo 網頁 → Robot → 地圖 → 匯出 JSON</li><li>每個已分區嘅房間會變成一個長方形房，再對住底圖修正</li></ol></details>
+      <details><summary>叫 AI 幫你寫 plan</summary>
+        <p class="mut" style="margin:6px 0">將以下格式貼畀 ChatGPT / Claude，叫佢按你嘅圖則寫，再存做 .json 匯入：</p>
+        <pre class="card" style="white-space:pre-wrap;font-size:11.5px;overflow:auto" id="aispec"></pre></details>
+    </div></div></section>
+
+    <!-- 設定 -->
+    <section class="page" id="pset" hidden><div class="scroll"><div class="wrap set" id="setwrap"></div></div></section>
+  </main>
+</div>
+<div class="toast" id="toast"></div>
+<script type="module" src="js/app.js"></script>
+</body>
+</html>
