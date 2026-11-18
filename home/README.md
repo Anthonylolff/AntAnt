@@ -12,7 +12,7 @@
 | **風格** | 9 套：霓虹、合成波、溫馨、建築模型、冬夜、日光、藍圖、日式原木、黑金。可以自己調牆色、木色、布料、櫃色；可以跟太陽日夜自動換。|
 | **日照時光** | 拉時間軸睇一日太陽點行、影子點變，或者「播一日」。有連 HA 就用 `sun.sun` 嘅真實位置。|
 | **編輯** | 左邊 2D、右邊 3D 即時跟住變。畫房（自動起牆）、畫牆、加門窗、拖角改形、「+」加角、傢俬庫（35 款）、放 HA 裝置、底圖描圖、核對清單、復原／重做。|
-| **匯入** | Apple RoomPlan `.json`、CAD `.dxf`、Sweet Home 3D `.sh3d`、`.glb/.gltf/.obj/.stl`、Valetudo 地圖 `.json`、本 app／AI 寫嘅 plan `.json`。全部喺瀏覽器處理，唔會上傳。|
+| **匯入** | iPhone 掃描 `.usdz`、Apple RoomPlan `.json`、CAD `.dxf`、Sweet Home 3D `.sh3d`、`.glb/.gltf/.obj/.stl`、Valetudo 地圖 `.json`、本 app／AI 寫嘅 plan `.json`。全部喺瀏覽器處理，唔會上傳。|
 | **搵嘢** | 打字或者講嘢（🎙）：「洗衣機喺邊」→ 飛去嗰度閃一下。房間可以設語音別名。|
 
 ## 接 Home Assistant
@@ -32,7 +32,8 @@
 
 ## 匯入格式備註
 
-- **RoomPlan**：用匯出 `CapturedRoom` / `CapturedStructure` JSON 嘅 App（唔係 `.usdz`）。iOS 17 嘅 `floors` 多邊形同 `sections` 房名都會用到；多層（`story`）會分開做唔同樓層。平面會自動轉正。
+- **iPhone USDZ**：RoomPlan 參數模型（prim 名有 `Wall`、`Door`、`Window`、`Opening`、`Floor`、`Bed`、`Sofa`…）會自動變成牆、門窗、房同傢俬；冇呢啲結構嘅掃描網格就當 3D 模型參考。用 three.js 0.187 嘅 USDC／USDA 解析器（喺 jsDelivr 載入）。
+- **RoomPlan JSON**：`CapturedRoom` / `CapturedStructure` JSON。iOS 17 嘅 `floors` 多邊形同 `sections` 房名都會用到；多層（`story`）會分開做唔同樓層。平面會自動轉正。
 - **DXF**：牆最好喺 `WALL`／`牆` 圖層；雙線牆會自動配對成中線＋厚度。房間用閉合多段線放 `ROOM` 圖層，房名用文字。門認門圖塊（名有 DOOR／門）或者門弧。原本嘅線會變底圖。
 - **3D 模型**：只做半透明參考（唔會儲存）＋由頂影一張底圖，要用「房間」工具描一次。
 - **掃地機地圖**：每個分區變一個長方形房，再對住底圖修正。
@@ -60,7 +61,7 @@
 }
 ```
 
-`samples/` 入面有兩個試用檔：`roomplan-bedroom.json`（模擬 iPhone 掃描）同 `plan-sample.dxf`（兩房 CAD）。
+`samples/` 入面有試用檔：`roomplan-sample.usdz`、`roomplan-bedroom.json`（模擬 iPhone 掃描，係按 RoomPlan 結構自己整嘅，唔係真機掃描）同 `plan-sample.dxf`（兩房 CAD）。
 
 ## 檔案
 
