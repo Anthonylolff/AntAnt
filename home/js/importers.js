@@ -9,6 +9,7 @@ export async function importFile(file) {
   if (ext === 'dxf') return importDXF(await file.text(), name);
   if (ext === 'sh3d' || ext === 'zip') return importSH3D(await file.arrayBuffer(), name);
   if (['glb', 'gltf', 'obj', 'stl'].includes(ext)) return importMesh(file, ext, name);
+  if (['usdz', 'usdc', 'usda', 'usd'].includes(ext)) return importUSD(await file.arrayBuffer(), name);
   if (ext === 'json' || ext === 'txt' || ext === 'fpjson' || !ext) {
     let j; try { j = JSON.parse(await file.text()); } catch (e) { throw new Error('JSON 讀唔到：' + e.message); }
     return importJSON(j, name);
@@ -125,7 +126,7 @@ export function importRoomPlan(j, name) {
       const x = rpXform(w); if (!x) continue;
       floorY = Math.min(floorY, x.p[1] - x.h / 2); maxH = Math.max(maxH, x.h);
       const hx = x.ax[0] * x.w / 2, hz = x.ax[2] * x.w / 2;
-      const nw = newWall(R([x.p[0] - hx, x.p[2] - hz]), R([x.p[0] + hx, x.p[2] + hz]), Math.max(0.08, Math.min(0.4, x.d || 0.12)));
+      const nw = newWall(R([x.p[0] - hx, x.p[2] - hz]), R([x.p[0] + hx, x.p[2] + hz]), x.d > 0.05 ? Math.min(0.4, x.d) : 0.12);
       nw.src = 'roomplan'; if (w.curve) warnings.push('有弧形牆，已當直牆處理');
       f.walls.push(nw); if (w.identifier) idMap.set(w.identifier, nw);
     }
@@ -468,15 +469,16 @@ export function importValetudo(j, name) {
 }
 
 // ------------------------------------------------------------------ 3D 模型
-export async function importMesh(file, ext, name) {
-  const warnings = []; let obj;
-  if (ext === 'glb' || ext === 'gltf') {
+export async function importMesh(file, ext, name, preObj, preWarnings = []) {
+  const warnings = [...preWarnings]; let obj = preObj;
+  if (obj) { /* 已經砌好（例如 USDZ 冇結構嘅掃描網格） */ }
+  else if (ext === 'glb' || ext === 'gltf') {
     const { GLTFLoader } = await import('three/addons/loaders/GLTFLoader.js');
     const loader = new GLTFLoader(); const data = ext === 'glb' ? await file.arrayBuffer() : await file.text();
     obj = await new Promise((res, rej) => loader.parse(data, '', g => res(g.scene), rej));
   } else if (ext === 'obj') {
     const { OBJLoader } = await import('three/addons/loaders/OBJLoader.js'); obj = new OBJLoader().parse(await file.text());
-  } else {
+  } else if (ext === 'stl') {
     const { STLLoader } = await import('three/addons/loaders/STLLoader.js'); const geo = new STLLoader().parse(await file.arrayBuffer());
     obj = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color: 0xcccccc }));
   }
@@ -486,7 +488,7 @@ export async function importMesh(file, ext, name) {
   const s = maxD > 2000 ? 0.001 : maxD > 60 ? 0.01 : 1; if (s !== 1) { obj.scale.multiplyScalar(s); warnings.push(`模型好大，估計單位係${s === 0.001 ? '毫米' : '厘米'}，已縮細`); }
   box = new THREE.Box3().setFromObject(holder); size = box.getSize(new THREE.Vector3());
   // Z-up（STL / SketchUp 常見）→ Y-up
-  if ((ext === 'stl' || ext === 'obj') && size.z < 4.5 && size.y > size.z * 1.5 && size.y > 3) { obj.rotation.x = -Math.PI / 2; warnings.push('模型似係 Z 軸向上，已轉正'); }
+  if (!preObj && (ext === 'stl' || ext === 'obj') && size.z < 4.5 && size.y > size.z * 1.5 && size.y > 3) { obj.rotation.x = -Math.PI / 2; warnings.push('模型似係 Z 軸向上，已轉正'); }
   box = new THREE.Box3().setFromObject(holder);
   holder.position.set(-box.min.x, -box.min.y, -box.min.z);
   holder.updateMatrixWorld(true);
@@ -499,11 +501,194 @@ export async function importMesh(file, ext, name) {
   f.height = Math.max(2.2, Math.min(4, r3(fs.y)));
   warnings.push(`已載入 ${Math.round(tris).toLocaleString()} 個三角形做參考模型，同埋由頂影咗張底圖`);
   warnings.push('3D 模型冇「牆」「門」資料：請喺編輯器用「房間」工具對住底圖描一次（參考模型唔會儲存）');
-  return { source: '3D 模型', floors: [f], report: report([f]), warnings, object: holder };
+  return { source: preObj ? 'USDZ 掃描網格' : '3D 模型', floors: [f], report: report([f]), warnings, object: holder };
 }
 async function toJpeg(url) {
   const img = new Image(); img.src = url; await img.decode();
   const c = document.createElement('canvas'); c.width = img.width; c.height = img.height; const g = c.getContext('2d');
   g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height); g.drawImage(img, 0, 0);
   return c.toDataURL('image/jpeg', 0.85);
+}
+
+// ------------------------------------------------------------------ USDZ / USDC / USDA（iPhone RoomPlan 匯出）
+// 用 three.js 0.187 嘅獨立 USD 解析器（唔依賴 three 本身），再自己計每件嘢喺世界座標嘅位置同大細。
+const USD_PARSERS = 'https://cdn.jsdelivr.net/npm/three@0.187.0/examples/jsm/loaders/usd/';
+const RP_ARCH = /^(wall|door|window|opening|floor)(\d+|_\d+)?$/i;
+const RP_OBJ = /^(storage|refrigerator|stove|bed|sink|washerdryer|washer|dryer|toilet|bathtub|oven|dishwasher|table|sofa|chair|fireplace|television|tv|stairs)(\d+|_\d+)?$/i;
+const RP_OBJ_KEY = { storage: 'storage', refrigerator: 'refrigerator', stove: 'stove', bed: 'bed', sink: 'sink', washerdryer: 'washerDryer', washer: 'washerDryer', dryer: 'washerDryer', toilet: 'toilet', bathtub: 'bathtub', oven: 'oven', dishwasher: 'dishwasher', table: 'table', sofa: 'sofa', chair: 'chair', fireplace: 'fireplace', television: 'television', tv: 'television', stairs: 'stairs' };
+
+async function parseUSDLayer(bytes) {
+  const head = new TextDecoder().decode(bytes.subarray(0, 8));
+  if (head === 'PXR-USDC') {
+    const { USDCParser } = await import(USD_PARSERS + 'USDCParser.js');
+    return new USDCParser().parseData(bytes.slice().buffer).specsByPath;
+  }
+  const text = new TextDecoder().decode(bytes);
+  if (!text.startsWith('#usda')) throw new Error('唔係有效嘅 USD 檔');
+  const { USDAParser } = await import(USD_PARSERS + 'USDAParser.js');
+  return new USDAParser().parseData(text).specsByPath;
+}
+
+export async function importUSD(buf, name) {
+  const u8 = new Uint8Array(buf); let layer = u8;
+  if (u8[0] === 0x50 && u8[1] === 0x4b) { // zip → 第一個 usd 檔就係主 layer
+    const files = await unzip(buf);
+    const main = Object.keys(files).find(n => /\.usd[ca]?$/i.test(n));
+    if (!main) throw new Error('USDZ 入面搵唔到 .usdc / .usda');
+    layer = await files[main]();
+  }
+  let specs;
+  try { specs = await parseUSDLayer(layer); } catch (e) { throw new Error('USD 讀唔到：' + e.message); }
+  const scene = buildUSDScene(specs);
+  const semantic = collectSemantic(scene);
+  if (semantic.walls.length >= 2) {
+    const r = importRoomPlan(semantic.json, name);
+    r.source = 'iPhone 掃描 (USDZ)';
+    r.warnings.unshift(`由 USDZ 認到 ${semantic.walls.length} 幅牆、${semantic.json.doors.length + semantic.json.openings.length} 個門口、${semantic.json.windows.length} 個窗、${semantic.json.objects.length} 件傢俬`);
+    return r;
+  }
+  // 冇牆 / 門窗結構（例如普通掃描網格）→ 當 3D 模型參考
+  const obj = scene.meshObject();
+  if (!obj) throw new Error('USDZ 入面冇網格');
+  return importMesh(null, 'usdz', name, obj, ['呢個 USDZ 冇「牆／門／窗」結構（唔係 RoomPlan 參數模型），當普通 3D 模型處理']);
+}
+
+function buildUSDScene(specs) {
+  const prims = new Map(), attrs = new Map();
+  for (const [path, spec] of Object.entries(specs)) {
+    if (path === '/') continue;
+    const dot = path.lastIndexOf('.'), slash = path.lastIndexOf('/');
+    if (dot > slash) { const p = path.slice(0, dot); if (!attrs.has(p)) attrs.set(p, {}); attrs.get(p)[path.slice(dot + 1)] = spec.fields?.default ?? firstSample(spec.fields?.timeSamples); }
+    else prims.set(path, spec.fields || {});
+  }
+  const rootF = specs['/']?.fields || {};
+  const zUp = String(rootF.upAxis || 'Y').toUpperCase() === 'Z', mpu = +rootF.metersPerUnit || 1;
+  const A = p => attrs.get(p) || {};
+  const local = path => {
+    const f = prims.get(path) || {}, a = A(path);
+    const order = f.xformOpOrder || a.xformOpOrder || [];
+    const M = new THREE.Matrix4();
+    for (let op of order) {
+      let inv = false; if (op.startsWith('!invert!')) { inv = true; op = op.slice(8); }
+      const v = a[op], kind = op.split(':')[1] || '', m = new THREE.Matrix4();
+      if (v == null) continue;
+      const n = Array.from(flatNum(v));
+      if (kind === 'transform') m.fromArray(n);
+      else if (kind === 'translate') m.makeTranslation(n[0] || 0, n[1] || 0, n[2] || 0);
+      else if (kind === 'scale') m.makeScale(n[0] ?? 1, n[1] ?? n[0] ?? 1, n[2] ?? n[0] ?? 1);
+      else if (kind === 'orient') m.makeRotationFromQuaternion(new THREE.Quaternion(n[0], n[1], n[2], n[3]));
+      else if (/^rotate[XYZ]$/.test(kind)) { const ax = kind[6]; m['makeRotation' + ax](n[0] * Math.PI / 180); }
+      else if (/^rotate[XYZ]{3}$/.test(kind)) { const ord = kind.slice(6); m.makeRotationFromEuler(new THREE.Euler(n[0] * Math.PI / 180, n[1] * Math.PI / 180, n[2] * Math.PI / 180, ord.split('').reverse().join(''))); }
+      else continue;
+      if (inv) m.invert();
+      M.multiply(m);
+    }
+    return M;
+  };
+  const rootM = new THREE.Matrix4().makeScale(mpu, mpu, mpu);
+  if (zUp) rootM.multiply(new THREE.Matrix4().makeRotationX(-Math.PI / 2));
+  const worldCache = new Map();
+  const world = path => {
+    if (worldCache.has(path)) return worldCache.get(path);
+    const i = path.lastIndexOf('/'), parent = i > 0 ? path.slice(0, i) : null;
+    const W = (parent && prims.has(parent) ? world(parent) : rootM).clone().multiply(local(path));
+    worldCache.set(path, W); return W;
+  };
+  const meshes = [...prims.keys()].filter(p => prims.get(p).typeName === 'Mesh' && A(p).points);
+  const pointsOf = p => { const arr = flatNum(A(p).points), W = world(p), out = [], v = new THREE.Vector3(); for (let i = 0; i + 2 < arr.length; i += 3) out.push(v.set(arr[i], arr[i + 1], arr[i + 2]).applyMatrix4(W).clone()); return out; };
+  return {
+    prims, attrs: A, world, meshes, pointsOf,
+    meshObject() {
+      if (!meshes.length) return null;
+      const g = new THREE.Group();
+      for (const p of meshes) {
+        const pts = pointsOf(p), counts = flatNum(A(p).faceVertexCounts || []), idx = flatNum(A(p).faceVertexIndices || []);
+        const pos = []; let k = 0;
+        for (const c of counts) { for (let j = 1; j + 1 < c; j++) for (const t of [idx[k], idx[k + j], idx[k + j + 1]]) { const q = pts[t]; if (q) pos.push(q.x, q.y, q.z); } k += c; }
+        if (!pos.length) continue;
+        const geo = new THREE.BufferGeometry(); geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); geo.computeVertexNormals();
+        g.add(new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color: 0xcccccc })));
+      }
+      return g.children.length ? g : null;
+    },
+  };
+}
+const firstSample = ts => { if (!ts) return undefined; if (ts instanceof Map) return ts.values().next().value; const v = Object.values(ts); return v.length ? (v[0]?.value ?? v[0]) : undefined; };
+function flatNum(v) {
+  if (v == null) return [];
+  if (ArrayBuffer.isView(v)) return v;
+  if (Array.isArray(v)) return v.flat(3).map(Number);
+  if (typeof v === 'object') return Object.values(v).flat(3).map(Number);
+  return [Number(v)];
+}
+
+// 搵出 RoomPlan 參數模型入面嘅牆、門、窗、地台、傢俬，轉做 CapturedRoom JSON 格式
+function collectSemantic(scene) {
+  const leaf = p => p.slice(p.lastIndexOf('/') + 1);
+  const hits = [];
+  for (const path of scene.prims.keys()) {
+    const n = leaf(path); if (/_grp$/i.test(n)) continue;
+    let m = n.match(RP_ARCH), cls = null, cat = null;
+    if (m) { cls = m[1].toLowerCase(); }
+    else if ((m = n.match(RP_OBJ))) { cls = 'object'; cat = RP_OBJ_KEY[m[1].toLowerCase()]; }
+    if (!cls) continue;
+    // 祖先已經認咗同一類就跳過（例如 Wall0/Wall0 呢種重複命名）
+    if (hits.some(h => path.startsWith(h.path + '/'))) continue;
+    hits.push({ path, cls, cat });
+  }
+  const json = { walls: [], doors: [], windows: [], openings: [], objects: [], floors: [], sections: [] };
+  const walls = [];
+  for (const h of hits) {
+    const pts = scene.meshes.filter(p => p === h.path || p.startsWith(h.path + '/')).flatMap(p => scene.pointsOf(p));
+    if (pts.length < 3) continue;
+    if (h.cls === 'floor') {
+      const poly = floorOutline(scene, h.path) || convexHull(pts.map(p => [p.x, p.z]));
+      if (poly && poly.length >= 3) { const y = pts.reduce((s, p) => s + p.y, 0) / pts.length; json.floors.push({ identifier: h.path, polygonCorners: poly.map(([x, z]) => [x, y, z]), transform: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1], story: 0 }); }
+      continue;
+    }
+    const box = orientedBox(pts, scene.world(h.path));
+    const rec = { identifier: h.path, dimensions: [box.w, box.h, box.d], transform: [box.ax[0], 0, box.ax[1], 0, 0, 1, 0, 0, -box.ax[1], 0, box.ax[0], 0, box.c[0], box.cy, box.c[1], 1], story: 0 };
+    if (h.cls === 'wall') { rec.category = { wall: {} }; json.walls.push(rec); walls.push(rec); }
+    else if (h.cls === 'door') { rec.category = { door: { isOpen: true } }; json.doors.push(rec); }
+    else if (h.cls === 'window') { rec.category = { window: {} }; json.windows.push(rec); }
+    else if (h.cls === 'opening') { rec.category = { opening: {} }; json.openings.push(rec); }
+    else { rec.category = { [h.cat]: {} }; json.objects.push(rec); }
+  }
+  // 門窗通常同牆放喺同一個 Wall_N_grp：用嚟搵 parentIdentifier
+  for (const o of [...json.doors, ...json.windows, ...json.openings]) {
+    const grp = o.identifier.slice(0, o.identifier.lastIndexOf('/'));
+    const w = walls.find(w => w.identifier.slice(0, w.identifier.lastIndexOf('/')) === grp && /\/wall[^/]*$/i.test(w.identifier));
+    if (w) o.parentIdentifier = w.identifier;
+  }
+  return { json, walls };
+}
+// 用件嘢自己嘅軸計長闊高；如果軸唔準（例如網格已經烘咗轉角），就用最細面積長方形
+function orientedBox(pts, W) {
+  const ax0 = new THREE.Vector3().setFromMatrixColumn(W, 0); let ax = [ax0.x, ax0.z]; let L = Math.hypot(ax[0], ax[1]);
+  let y0 = Infinity, y1 = -Infinity; for (const p of pts) { y0 = Math.min(y0, p.y); y1 = Math.max(y1, p.y); }
+  const fit = a => { let u0 = Infinity, u1 = -Infinity, v0 = Infinity, v1 = -Infinity; for (const p of pts) { const u = p.x * a[0] + p.z * a[1], v = -p.x * a[1] + p.z * a[0]; u0 = Math.min(u0, u); u1 = Math.max(u1, u); v0 = Math.min(v0, v); v1 = Math.max(v1, v); } return { u0, u1, v0, v1, area: (u1 - u0) * (v1 - v0) }; };
+  let best = null;
+  if (L > 0.2) { ax = [ax[0] / L, ax[1] / L]; best = { a: ax, ...fit(ax) }; }
+  const hull = convexHull(pts.map(p => [p.x, p.z])) || [];
+  for (let i = 0; i < hull.length; i++) {
+    const p = hull[i], q = hull[(i + 1) % hull.length], l = Math.hypot(q[0] - p[0], q[1] - p[1]); if (l < 1e-4) continue;
+    const a = [(q[0] - p[0]) / l, (q[1] - p[1]) / l], f = fit(a);
+    if (!best || f.area < best.area * 0.97 - 1e-4) best = { a, ...f };
+  }
+  const { a, u0, u1, v0, v1 } = best, cu = (u0 + u1) / 2, cv = (v0 + v1) / 2;
+  return { ax: a, w: u1 - u0, d: v1 - v0, h: y1 - y0, cy: (y0 + y1) / 2, c: [cu * a[0] - cv * a[1], cu * a[1] + cv * a[0]] };
+}
+// 地台網格嘅外框：只出現一次嘅邊串起嚟
+function floorOutline(scene, path) {
+  const ms = scene.meshes.filter(p => p === path || p.startsWith(path + '/')); if (ms.length !== 1) return null;
+  const A = scene.attrs(ms[0]), counts = flatNum(A.faceVertexCounts || []), idx = flatNum(A.faceVertexIndices || []), pts = scene.pointsOf(ms[0]);
+  if (!counts.length) return null;
+  const edges = new Map(); let k = 0;
+  for (const c of counts) { for (let j = 0; j < c; j++) { const a = idx[k + j], b = idx[k + (j + 1) % c], key = a < b ? a + ',' + b : b + ',' + a; edges.set(key, (edges.get(key) || 0) + 1); } k += c; }
+  const nb = new Map(); for (const [key, n] of edges) if (n === 1) { const [a, b] = key.split(',').map(Number); (nb.get(a) || nb.set(a, []).get(a)).push(b); (nb.get(b) || nb.set(b, []).get(b)).push(a); }
+  if (nb.size < 3) return null;
+  const start = nb.keys().next().value, loop = [start]; let prev = -1, cur = start;
+  for (let i = 0; i < nb.size; i++) { const next = (nb.get(cur) || []).find(n => n !== prev); if (next == null || next === start) break; loop.push(next); prev = cur; cur = next; }
+  if (loop.length < 3) return null;
+  return loop.map(i => [pts[i].x, pts[i].z]);
 }

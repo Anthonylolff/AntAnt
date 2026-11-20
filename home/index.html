@@ -301,20 +301,22 @@ details code,.wrap code{background:var(--chrome3);padding:1px 5px;border-radius:
       <h2>匯入平面圖 <span class="beta">BETA</span></h2>
       <p class="lead">由其他程式或者掃描帶入房、牆、門窗、傢俬。檔案只喺你部機嘅瀏覽器處理，唔會上傳。</p>
       <label class="drop" id="drop"><b>拖個檔落嚟，或者撳一下揀檔</b>
-        <span class="mut">iPhone/iPad RoomPlan 掃描 (.json) · CAD (.dxf) · Sweet Home 3D (.sh3d) · 3D 模型 (.glb .gltf .obj .stl) · Valetudo 掃地機地圖 (.json) · 本 app 或 AI 寫嘅 plan (.json)</span>
-        <input type="file" id="file" hidden accept=".json,.dxf,.sh3d,.glb,.gltf,.obj,.stl,.zip,.txt">
+        <span class="mut">iPhone/iPad 掃描 (.usdz / RoomPlan .json) · CAD (.dxf) · Sweet Home 3D (.sh3d) · 3D 模型 (.glb .gltf .obj .stl) · Valetudo 掃地機地圖 (.json) · 本 app 或 AI 寫嘅 plan (.json)</span>
+        <input type="file" id="file" hidden accept=".json,.dxf,.sh3d,.glb,.gltf,.obj,.stl,.usdz,.usdc,.usda,.usd,.zip,.txt">
       </label>
       <div class="result" id="result"></div>
       <div class="fmts">
-        <div class="card"><small>最快</small><b>iPhone 掃描</b><p>有 LiDAR 嘅 iPhone / iPad，用 RoomPlan 掃一圈</p></div>
+        <div class="card"><small>最快</small><b>iPhone 掃描</b><p>有 LiDAR 嘅 iPhone / iPad 掃一圈，匯出 USDZ 或 RoomPlan JSON</p></div>
         <div class="card"><small>有圖紙</small><b>CAD</b><p>設計師或者物業畀嘅 DXF</p></div>
         <div class="card"><small>有模型</small><b>3D 模型</b><p>Blender、SketchUp 匯出嘅 glb / obj / stl</p></div>
         <div class="card"><small>土辦法</small><b>掃地機地圖</b><p>Valetudo 匯出嘅地圖 JSON</p></div>
       </div>
       <h3 style="font-size:15px;margin:20px 0 6px">點樣匯出…</h3>
       <details><summary>iPhone / iPad（RoomPlan，要有 LiDAR：Pro 系列 iPhone 12 起、iPad Pro 2020 起）</summary>
-        <ol><li>用支援 RoomPlan 匯出 JSON 嘅 App（例如 Apple 嘅 RoomPlan 範例 App，或者其他標明「CapturedRoom JSON」嘅掃描 App）</li>
-        <li>逐間房慢慢行一圈，鏡頭對住牆角同門窗</li><li>匯出 <code>.json</code>（唔係 .usdz），AirDrop 去電腦或者直接喺 iPad 開呢頁揀檔</li>
+        <ol><li>用有「房間 / Room」模式（Apple RoomPlan）嘅掃描 App，逐間房慢慢行一圈，鏡頭對住牆角同門窗</li>
+        <li>匯出 <code>.usdz</code>（RoomPlan 參數模型）或者 <code>CapturedRoom .json</code>，存去「檔案」</li>
+        <li>喺 iPhone / iPad 開呢頁 → 揀檔；或者 AirDrop 去電腦</li>
+        <li>有牆／門／窗結構嘅 USDZ 會自動變成房；普通掃描網格（冇結構）會變半透明參考 + 底圖，要用「房間」工具描</li>
         <li>匯入後去「編輯」逐間房核對：牆厚、門口闊、窗台高</li></ol></details>
       <details><summary>CAD / AutoCAD / 中望 / DraftSight</summary>
         <ol><li>另存為 <code>DXF</code>（R12 至 2018 都得）</li><li>牆最好喺 <code>WALL</code> / <code>牆</code> 圖層；房間用閉合多段線放喺 <code>ROOM</code> 圖層，房名用文字放入房</li>
