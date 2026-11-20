@@ -8,6 +8,30 @@ const M = v => v / 100;  // cm → m
 const $ = id => document.getElementById(id);
 
 let renderer, scene, camera, controls, built = false, raf = 0, ceilingGroup;
+let BEDS = [], BED_OPEN = false;
+function applyBed() { for (const b of BEDS) { b.lift.rotation.z = BED_OPEN ? 0.85 : 0; for (const dr of b.drawers) dr.position.x = dr.userData.x0 + (BED_OPEN ? 0.32 : 0); for (const st of b.struts) st.visible = BED_OPEN; } }
+let LIGHTS_ON = true, NIGHT = false, HEMI = null, SUN = null, SKY = null, NIGHT_BG = new THREE.Color(0x0d1424);
+function applyLights() { // 開燈／閂燈：室內燈、燈帶、筒燈；窗外日光保留
+  scene.traverse(o => { if (o.isPointLight || o.isSpotLight) { if (o.userData.i0 === undefined) o.userData.i0 = o.intensity; o.intensity = LIGHTS_ON ? o.userData.i0 : 0; } });
+  MAT.led.emissiveIntensity = LIGHTS_ON ? 2.4 : 0; MAT.led.color.set(LIGHTS_ON ? 0xfff1d6 : 0xd8d8d8);
+  // 日／夜
+  if (HEMI) HEMI.intensity = NIGHT ? 0.05 : 0.45;
+  if (SUN) SUN.intensity = NIGHT ? 0.04 : 1.7;
+  if (SKY === null && scene.background && !scene.background.isColor) SKY = scene.background;
+  scene.background = NIGHT ? NIGHT_BG : (SKY || scene.background);
+  if (scene.environment && !scene.userData.env) scene.userData.env = scene.environment;
+  const env = scene.userData.env;
+  // r160 冇 environmentIntensity，用環境貼圖開關模擬：日頭閂燈保留天光反射；夜晚閂燈就幾乎全黑
+  scene.environment = NIGHT ? (LIGHTS_ON ? env : null) : env;
+  scene.traverse(o => { const ms = o.material ? (Array.isArray(o.material) ? o.material : [o.material]) : []; for (const m of ms) if ('envMapIntensity' in m) { if (m.userData.e0 === undefined) m.userData.e0 = m.envMapIntensity; m.envMapIntensity = m.userData.e0 * (NIGHT ? 0.35 : (LIGHTS_ON ? 1 : 0.55)); } });
+}
+let XRAY = false;
+function applyXray() { // X 光：牆變半透明，睇穿入房
+  const seen = new Set();
+  for (const c of CUTS) { const m = c.mesh.material; if (seen.has(m)) continue; seen.add(m);
+    m.transparent = XRAY; m.opacity = XRAY ? 0.15 : 1; m.depthWrite = !XRAY; m.needsUpdate = true; }
+  for (const c of CUTS) c.mesh.castShadow = !XRAY;
+}
 let DOORS = [], DOORS_OPEN = false, CUT = false, CUTS = [];
 const CUT_H = 1.2;
 
@@ -292,16 +316,58 @@ function makeItem(it) {
       break;
     }
     case 'bed': {
-      if (it.boxH) { // 實際尺寸：床箱高 boxH、床褥厚 mattH（cm）
-        const bh = it.boxH / 100, mh = (it.mattH || 25) / 100, top = bh + mh, hb = 0.05;
-        box(w, bh - 0.06, d - hb, MAT.creamW, 0, 0.06 + (bh - 0.06) / 2, hb / 2, g);                 // 床箱（同櫃一樣木紋）
-        box(w - 0.04, 0.06, d - hb - 0.04, MAT.black, 0, 0.03, hb / 2, g, false);                     // 地腳
-        box(0.004, bh - 0.1, d - hb - 0.1, MAT.inner, w / 2 + 0.001, 0.06 + (bh - 0.06) / 2, hb / 2, g, false);
-        rbox(w - 0.03, mh, d - hb - 0.02, 0.05, MAT.linen, 0, bh + mh / 2, hb / 2, g);               // 床褥
-        rbox(w + 0.0, 0.06, (d - hb) * 0.6, 0.03, MAT.duvet, 0, top + 0.02, d * 0.18, g);
+      if (it.boxH) { // 訂造床箱：走廊嗰邊兩個並排櫃桶（深約 40、有封頂板），靠窗嗰邊空心；成塊床板用氣壓撐、鉸喺窗邊揭起
+        const bh = it.boxH / 100, mh = (it.mattH || 25) / 100, hb = 0.05, t = 0.018, L = d - hb, zc = hb / 2, z0 = -d / 2 + hb, kick = 0.06, dd = 0.4;
+        const SK = MAT.creamW;
+        // 箱身（板）
+        const xd = w / 2 - dd;                                                                     // 櫃桶間隔板
+        box(dd, t, L, MAT.innerLight, w / 2 - dd / 2, kick + t / 2, zc, g);                       // 底板（淨係櫃桶嗰邊）
+        box(dd - 0.02, kick, L - 0.04, MAT.black, w / 2 - dd / 2, kick / 2, zc, g, false);       // 地腳
+        box(t, bh, L, SK, -w / 2 + t / 2, bh / 2, zc, g);                                         // 靠窗側板（落到地）
+        for (const ez of [z0 + t / 2, d / 2 - t / 2]) box(w, bh, t, SK, 0, bh / 2, ez, g);
+        box(t, bh, L - 2 * t, MAT.innerLight, xd, bh / 2, zc, g);
+        box(xd - (-w / 2 + t) - 0.01, 0.006, L - 2 * t - 0.01, new THREE.MeshStandardMaterial({ color: 0x8d8a85, roughness: 1 }), (xd + (-w / 2 + t)) / 2, 0.003, zc, g, false);   // 空心位唔做底板：地台鋪毛氈
+        box(dd, t, L - 2 * t, SK, w / 2 - dd / 2, bh - 0.03, zc, g);                              // 櫃桶封頂板
+        box(t, bh - kick, L, SK, w / 2 - t / 2, kick + (bh - kick) / 2, zc, g, false).visible = false;
+        // 櫃桶 ×2
+        const drawers = []; const dl = (L - 2 * t) / 2;
+        for (let i = 0; i < 2; i++) {
+          const dz = z0 + t + dl * (i + 0.5), dr = new THREE.Group(); dr.userData.x0 = 0; dr.position.set(0, 0, 0); g.add(dr);
+          const fh = bh - kick - 0.04, fy = kick + 0.01 + fh / 2;
+          box(0.02, fh, dl - 0.006, SK, w / 2 - 0.01, fy, dz, dr);                                // 櫃桶面
+          box(0.008, 0.02, Math.min(0.3, dl * 0.5), MAT.inner, w / 2 + 0.001, kick + fh - 0.03, dz, dr, false);   // 坑手
+          const ih = fh - 0.06, ix = w / 2 - dd / 2 - 0.01;
+          box(dd - 0.04, 0.012, dl - 0.04, MAT.lightOak, ix, kick + 0.03, dz, dr);
+          for (const sz of [-1, 1]) box(dd - 0.04, ih, 0.012, MAT.lightOak, ix, kick + 0.03 + ih / 2, dz + sz * (dl / 2 - 0.03), dr);
+          box(0.012, ih, dl - 0.04, MAT.lightOak, w / 2 - dd + 0.02, kick + 0.03 + ih / 2, dz, dr);
+          const cols = [0xe8e4dc, 0x9aa5b1, 0x34404d, 0xc9b79c, 0x6b7d6a];
+          for (let k = 0; k < 4; k++) box(0.28, 0.07 + (k % 2) * 0.03, 0.16, new THREE.MeshStandardMaterial({ color: cols[(k + i) % cols.length], roughness: 0.9 }), ix, kick + 0.08 + (k % 2) * 0.015, dz - dl / 2 + 0.12 + k * (dl - 0.2) / 3.2, dr, false);
+          drawers.push(dr);
+        }
+        // 空心位入面：喼、收納箱、被
+        const hx = (-w / 2 + t + xd) / 2, hwid = xd - (-w / 2 + t);
+        const alu = new THREE.MeshStandardMaterial({ color: 0xc9ccd0, roughness: 0.3, metalness: 0.85 });
+        const hx0w = -w / 2 + t + 0.02;
+        rbox(0.37, 0.435, 0.805, 0.03, alu, 0, 0, 0, g).visible = false;
+        { const tp = rbox(0.435, 0.37, 0.805, 0.03, alu, hx0w + 0.435 / 2, 0.007 + 0.185, z0 + t + 0.03 + 0.805 / 2, g);        // Rimowa Trunk Plus（瞓低）
+          for (let k = 0; k < 9; k++) box(0.435, 0.004, 0.008, alu, hx0w + 0.435 / 2, 0.007 + 0.37 + 0.001, z0 + t + 0.08 + k * 0.09, g, false); }
+        { const zc2 = z0 + t + 0.03 + 0.805 + 0.05 + 0.79 / 2; rbox(0.515, 0.275, 0.79, 0.03, alu, hx0w + 0.515 / 2, 0.007 + 0.1375, zc2, g);   // Rimowa Check-In L（瞓低）
+          for (let k = 0; k < 9; k++) box(0.515, 0.004, 0.008, alu, hx0w + 0.515 / 2, 0.007 + 0.276, zc2 - 0.36 + k * 0.09, g, false); }
+        rbox(Math.max(0.2, xd - (-w / 2 + t) - 0.55), 0.14, 0.5, 0.06, MAT.duvet, xd - 0.15, 0.08, z0 + t + 0.3, g);          // 被鋪
+        // 揭起部分：床板＋床褥＋被＋枕頭，鉸喺窗邊
+        const lift = new THREE.Group(); lift.position.set(-w / 2 + 0.01, bh, 0); g.add(lift);
+        const lx = (x) => x - (-w / 2 + 0.01);
+        box(w - 0.02, t, L - 0.02, SK, lx(0), -t / 2, zc, lift);
+        for (let k = 0; k < 4; k++) box(0.03, 0.004, 0.25, MAT.inner, lx(-0.3 + k * 0.2), -t - 0.001, zc, lift, false);   // 透氣孔
+        rbox(w - 0.03, mh, L - 0.02, 0.05, MAT.linen, lx(0), mh / 2, zc, lift);
+        rbox(w, 0.06, L * 0.6, 0.03, MAT.duvet, lx(0), mh + 0.02, d * 0.18, lift);
         const n = w > 1.1 ? 2 : 1, pw = Math.min(0.6, (w - 0.16) / n);
-        for (let i = 0; i < n; i++) rbox(pw, 0.13, 0.36, 0.06, MAT.linen, -((n - 1) * (pw + 0.06)) / 2 + i * (pw + 0.06), top + 0.06, -d / 2 + hb + 0.25, g);
+        for (let i = 0; i < n; i++) rbox(pw, 0.13, 0.36, 0.06, MAT.linen, lx(-((n - 1) * (pw + 0.06)) / 2 + i * (pw + 0.06)), mh + 0.06, z0 + 0.25, lift);
+        // 氣壓撐
+        const struts = [];
+        for (const sz of [z0 + 0.35, d / 2 - 0.35]) { const st = cyl(0.012, 0.012, 0.42, MAT.steel, xd - 0.05, bh - 0.05, sz, g, 10); st.rotation.z = -0.9; st.visible = false; struts.push(st); }
         rbox(w, 1.05, hb, 0.02, MAT.fabricGrey, 0, 0.525, -d / 2 + hb / 2, g);                       // 軟包床頭板
+        BEDS.push({ lift, drawers, struts });
         break;
       }
       box(w, 0.28, d, MAT.walnut, 0, 0.14, 0, g);
@@ -487,7 +553,8 @@ function makeItem(it) {
       const up = ht - top0; box(w, up, d, MAT.cream, 0, top0 + up / 2, 0, g);
       box(0.004, up - 0.04, 0.004, MAT.creamDark, 0, top0 + up / 2, d / 2 + 0.002, g, false);
       // 圓角
-      const rc = cyl(0.06, 0.06, ht - 0.17, MAT.cream, w / 2 - 0.06, 0.17 + (ht - 0.17) / 2, d / 2 - 0.06, g); rc.scale.set(1, 1, 1);
+      // 圓角只做喺櫃桶同上櫃，開放枱面位唔要柱
+      for (const [y0, y1] of [[0.17, nicheB], [top0, ht]]) cyl(0.06, 0.06, y1 - y0, MAT.cream, w / 2 - 0.06, (y0 + y1) / 2, d / 2 - 0.06, g);
       const nl = new THREE.PointLight(0xfff0d0, 0.35, 1.2, 2); nl.position.set(0, top0 - 0.05, 0.05); g.add(nl);
       break;
     }
@@ -620,8 +687,9 @@ function makeItem(it) {
       break;
     }
     case 'tvwall': { // 到頂電視組合櫃：兩邊高櫃、懸浮地櫃、木坑背板、頂櫃；55" LG QNED80
-      const ht = H - 0.02, side = Math.max(0.25, Math.min(0.45, (w - 1.4) / 2)), cw = w - 2 * side, x0 = -w / 2;
-      for (const sx of [x0 + side / 2, -x0 - side / 2]) {
+      const ht = H - 0.02, side = it.hollow ? 0.018 : Math.max(0.25, Math.min(0.45, (w - 1.4) / 2)), cw = w - 2 * side, x0 = -w / 2;
+      if (it.hollow) for (const sx of [x0 + side / 2, -x0 - side / 2]) box(side, ht, d, MAT.cream, sx, ht / 2, 0, g);   // 中空：兩邊得側板
+      else for (const sx of [x0 + side / 2, -x0 - side / 2]) {
         box(side, ht, d, MAT.cream, sx, ht / 2, 0, g);
         box(0.004, ht - 0.06, 0.004, MAT.creamDark, sx, ht / 2, d / 2 + 0.002, g, false);
         box(0.01, 0.3, 0.015, MAT.brass, sx + (sx < 0 ? side / 2 - 0.03 : -side / 2 + 0.03), 1.05, d / 2 + 0.008, g, false);
@@ -653,10 +721,14 @@ function makeItem(it) {
       box(0.04, 0.012, 0.004, MAT.led, 0, cy - th / 2 + 0.01, -d / 2 + 0.056, g, false);
       break;
     }
-    case 'toilet': {
-      box(w * 0.9, 0.38, 0.18, MAT.ceramic, 0, 0.6, -d / 2 + 0.09, g);
-      const bowl = cyl(w / 2, w / 2.6, 0.4, MAT.ceramic, 0, 0.2, 0.08, g); bowl.scale.z = (d - 0.2) / w;
-      const seat = cyl(w / 2 + 0.01, w / 2 + 0.01, 0.03, MAT.ceramic, 0, 0.415, 0.08, g); seat.scale.z = (d - 0.2) / w;
+    case 'toilet': { // Bellini BL-9099SV 自由咀分體座廁：590 深 × 365 闊 × 800 高，方水箱、包身圓廁盤
+      const tankD = 0.17, tankW = Math.min(w, 0.36), ht = 0.8;
+      rbox(tankW, 0.4, tankD, 0.015, MAT.ceramic, 0, ht - 0.2, -d / 2 + tankD / 2, g);              // 水箱
+      rbox(tankW + 0.01, 0.02, tankD + 0.01, 0.008, MAT.ceramic, 0, ht - 0.005, -d / 2 + tankD / 2, g);  // 水箱蓋
+      cyl(0.02, 0.02, 0.008, MAT.chrome, 0, ht + 0.009, -d / 2 + tankD / 2, g, 16);                    // 雙掣沖水按鈕
+      const bl = d - 0.05, base = cyl(w / 2, w / 2.4, 0.4, MAT.ceramic, 0, 0.2, -d / 2 + 0.05 + bl / 2, g, 32); base.scale.z = bl / w;   // 包身廁盤
+      box(w * 0.75, 0.4, 0.2, MAT.ceramic, 0, 0.2, -d / 2 + 0.13, g);
+      const seat = cyl(w / 2 + 0.005, w / 2 + 0.005, 0.025, MAT.ceramic, 0, 0.415, -d / 2 + tankD + (d - tankD) / 2, g, 32); seat.scale.z = (d - tankD) / w;   // 緩降廁板
       break;
     }
     case 'basin': {
@@ -697,7 +769,7 @@ function chair(g, x, z, rotY, solo) {
 
 // ---------------------------------------------------------------- build scene
 function build() {
-  const P = window.__plan; const S = P.state(); DOORS = []; CUTS = [];
+  const P = window.__plan; const S = P.state(); DOORS = []; CUTS = []; BEDS = [];
   scene = new THREE.Scene();
   scene.background = skyTex();
   const pm = new THREE.PMREMGenerator(renderer);
@@ -749,7 +821,7 @@ function build() {
       const r = rect(o.s, o.e);
       const before = world.children.length;
       if (o.type === 'win') {
-        const sill = o.e - o.s > 120 ? 0.85 : (part ? 1.0 : 0.95), head = 2.25;
+        const big = o.e - o.s > 120, sill = big ? 0.95 : (part ? 1.0 : 0.95), head = 2.25;
         seg(r, 0, sill); seg(r, head, H);
         const cx = M(r.x + r.w / 2), cz = M(r.y + r.h / 2), len = M(o.e - o.s), hgt = head - sill;
         const gl = box(horiz ? len : 0.008, hgt, horiz ? 0.008 : len, MAT.glass, cx, sill + hgt / 2, cz, world, false);
@@ -758,12 +830,34 @@ function build() {
         box(horiz ? len : 0.05, 0.04, horiz ? 0.05 : len, MAT.frame, cx, sill + 0.02, cz, world, false);
         box(horiz ? len : 0.05, 0.04, horiz ? 0.05 : len, MAT.frame, cx, head - 0.02, cz, world, false);
         box(horiz ? len + 0.06 : M(w.t) + 0.06, 0.03, horiz ? M(w.t) + 0.06 : len + 0.06, MAT.quartz, cx, sill - 0.015, cz, world, false);
+        if (big) { // 照相：上面一列細窗＋中間橫框；靠兩房中間嗰頭有窗口冷氣機位
+          const tr = 1.82;
+          box(horiz ? len : 0.06, 0.06, horiz ? 0.06 : len, MAT.white, cx, tr, cz, world, false);
+          const ac = 0.62, acH = 0.4, acD = 0.32, wt = M(w.t);
+          const along = horiz ? cx : cz, mid = 2.15, sgn = (horiz ? (mid > cx ? 1 : -1) : 1);
+          const ax = horiz ? cx + sgn * (len / 2 - ac / 2 - 0.02) : cx, az = horiz ? cz : cz + (len / 2 - ac / 2 - 0.02);
+          const inward = (horiz ? (cz > 3 ? -1 : 1) : (cx > 3 ? -1 : 1));
+          const fx = horiz ? ax : ax + inward * (wt / 2), fz = horiz ? az + inward * (wt / 2) : az;
+          box(horiz ? ac + 0.08 : wt + 0.06, acH + 0.08, horiz ? wt + 0.06 : ac + 0.08, MAT.white, ax, tr + 0.03 + acH / 2 + 0.04, az, world, false);            // 冷氣機位框
+          const acb = new THREE.MeshStandardMaterial({ color: 0xecebe7, roughness: 0.5 });
+          const ox = horiz ? 0 : inward * 0.1, oz = horiz ? inward * 0.1 : 0;
+          box(horiz ? ac : acD, acH, horiz ? acD : ac, acb, ax + ox, tr + 0.03 + acH / 2 + 0.04, az + oz, world);                                             // 窗口機
+          for (let k = 0; k < 8; k++) box(horiz ? ac - 0.08 : 0.004, 0.006, horiz ? 0.004 : ac - 0.08, MAT.inner, ax + ox + (horiz ? 0 : inward * (acD / 2 + 0.002)), tr + 0.12 + k * 0.035, az + oz + (horiz ? inward * (acD / 2 + 0.002) : 0), world, false);
+          box(horiz ? 0.08 : 0.004, 0.02, horiz ? 0.004 : 0.08, MAT.led, ax + ox + (horiz ? ac / 2 - 0.08 : inward * (acD / 2 + 0.003)), tr + acH, az + oz + (horiz ? inward * (acD / 2 + 0.003) : ac / 2 - 0.08), world, false);
+        }
       } else if (o.type === 'door' || o.type === 'gap') {
         seg(r, 2.1, H);
         if (o.type === 'door') { addDoorLeaf(world, w, o, horiz);
           const tW = M(w.t) + 0.02, fw = 0.05;
           if (horiz) { box(fw, 2.12, tW, MAT.doorFrame, M(r.x) + fw / 2, 1.06, M(r.y + r.h / 2), world, false); box(fw, 2.12, tW, MAT.doorFrame, M(r.x + r.w) - fw / 2, 1.06, M(r.y + r.h / 2), world, false); box(M(r.w), fw, tW, MAT.doorFrame, M(r.x + r.w / 2), 2.1 - fw / 2 + 0.02, M(r.y + r.h / 2), world, false); }
           else { box(tW, 2.12, fw, MAT.doorFrame, M(r.x + r.w / 2), 1.06, M(r.y) + fw / 2, world, false); box(tW, 2.12, fw, MAT.doorFrame, M(r.x + r.w / 2), 1.06, M(r.y + r.h) - fw / 2, world, false); box(tW, fw, M(r.h), MAT.doorFrame, M(r.x + r.w / 2), 2.1 - fw / 2 + 0.02, M(r.y + r.h / 2), world, false); }
+          if (o.lock) { // 舊式鐵閘（墨綠色），關埋喺門口外邊
+            const green = new THREE.MeshStandardMaterial({ color: 0x1f3a2c, roughness: 0.5, metalness: 0.6 }), L2 = horiz ? M(r.w) : M(r.h), n2 = Math.max(4, Math.round(L2 / 0.1));
+            const gx = M(r.x + r.w / 2), gz = M(r.y + r.h / 2), off2 = M(w.t) / 2 + 0.02;
+            for (let k = 0; k <= n2; k++) { const t2 = -L2 / 2 + L2 * k / n2; box(horiz ? 0.012 : 0.012, 2.05, 0.012, green, horiz ? gx + t2 : gx - off2, 1.025, horiz ? gz - off2 : gz + t2, world, false); }
+            for (const yy of [0.05, 1.0, 2.05]) box(horiz ? L2 : 0.02, 0.025, horiz ? 0.02 : L2, green, horiz ? gx : gx - off2, yy, horiz ? gz - off2 : gz, world, false);
+            for (let k = 0; k < n2; k++) for (const yy of [0.5, 1.5]) { const d2 = box(0.008, 0.5, 0.008, green, horiz ? gx - L2 / 2 + L2 * (k + 0.5) / n2 : gx - off2, yy, horiz ? gz - off2 : gz - L2 / 2 + L2 * (k + 0.5) / n2, world, false); if (horiz) d2.rotation.z = k % 2 ? 0.2 : -0.2; else d2.rotation.x = k % 2 ? 0.2 : -0.2; }
+          }
           if (o.pd) { // PD 門關埋（實心薩斯木）
             const pdT = 0.04; if (horiz) box(M(r.w) - 0.1, 2.03, pdT, MAT.doorWood, M(r.x + r.w / 2), 1.025, M(r.y + r.h / 2), world); else box(pdT, 2.03, M(r.h) - 0.1, MAT.doorWood, M(r.x + r.w / 2), 1.025, M(r.y + r.h / 2), world); }
         }
@@ -813,28 +907,76 @@ function build() {
       const kn = cyl(0.022, 0.022, 0.03, MAT.steel, hobX - 0.17, 0.925, hobZ + dz * 0.45, kit); 
     }
   }
-  // 抽油煙機：太平洋 PR-LW70 近吸式（695 闊 × 589 高 × 340 深），黑玻璃斜面
+  // 抽油煙機：德國寶 GPR-S722 傾斜式（699 闊 × 656 高 × 381 深）：頂深底窄，黑玻璃面向下斜向煮食爐；底部入風格柵＋兩盞燈；機底離爐面約 70cm
   if (hobZ !== null) {
-    const hx0 = M(KX), hb = 1.32, hh = 0.589, hd = 0.34, hw = 0.695;
-    const sh = new THREE.Shape(); sh.moveTo(0, 0); sh.lineTo(-hd, 0); sh.lineTo(-hd, 0.07); sh.lineTo(-0.13, hh); sh.lineTo(0, hh); sh.lineTo(0, 0);
-    const geo = new THREE.ExtrudeGeometry(sh, { depth: hw, bevelEnabled: false }); geo.translate(0, 0, -hw / 2);
-    const hood = new THREE.Mesh(geo, MAT.blackGlass); hood.position.set(hx0, hb, hobZ); hood.castShadow = true; kit.add(hood);
-    box(0.3, 0.012, hw - 0.04, MAT.steel, hx0 - 0.17, hb - 0.004, hobZ, kit, false);
-    box(0.004, 0.02, 0.2, MAT.led, hx0 - hd - 0.001, hb + 0.04, hobZ, kit, false);
+    const hx0 = M(KX), hb = 0.9 + 0.03 + 0.70, hh = 0.656, hd = 0.381, hw = 0.699, bd = 0.15, base = 0.075;
+    const sh = new THREE.Shape(); sh.moveTo(0, 0); sh.lineTo(-bd, 0); sh.lineTo(-bd, base); sh.lineTo(-hd, hh - 0.025); sh.lineTo(-hd, hh); sh.lineTo(0, hh); sh.lineTo(0, 0);
+    const geo = new THREE.ExtrudeGeometry(sh, { depth: hw - 0.006, bevelEnabled: false }); geo.translate(0, 0, -(hw - 0.006) / 2);
+    const body = new THREE.Mesh(geo, MAT.black); body.position.set(hx0, hb, hobZ); body.castShadow = true; kit.add(body);
+    // 斜面黑玻璃（略闊過機身）
+    const L = Math.hypot(hd - bd, hh - 0.025 - base), ang = Math.atan2(hd - bd, hh - 0.025 - base);
+    const gl = box(0.008, L, hw, MAT.blackGlass, hx0 - (hd + bd) / 2 - 0.004, hb + (base + hh - 0.025) / 2, hobZ, kit); gl.rotation.z = ang;
+    const ctl = box(0.004, 0.03, 0.17, MAT.led, hx0 - (hd + bd) / 2 - 0.006 - 0.04 * Math.sin(ang), hb + (base + hh) / 2 + 0.06, hobZ, kit, false); ctl.rotation.z = ang;   // 觸控面板
+    // 底部：入風格柵＋兩盞燈
+    for (let k = 0; k < 30; k++) box(0.004, base - 0.02, 0.004, MAT.steel, hx0 - bd - 0.002, hb + base / 2, hobZ - hw / 2 + 0.12 + k * (hw - 0.24) / 29, kit, false);
+    for (const dz of [-1, 1]) box(0.004, 0.035, 0.03, MAT.led, hx0 - bd - 0.003, hb + base / 2, hobZ + dz * (hw / 2 - 0.07), kit, false);
+    box(bd - 0.02, 0.004, hw - 0.04, MAT.steel, hx0 - bd / 2, hb - 0.001, hobZ, kit, false);
+    const hl = new THREE.SpotLight(0xfff2dd, 1.2, 1.4, 0.9, 0.6); hl.position.set(hx0 - 0.12, hb, hobZ); hl.target.position.set(hx0 - 0.25, 0.9, hobZ); kit.add(hl); kit.add(hl.target);
     // 吊櫃：爐頂嗰段拆走，機頂做矮櫃包喉
-    const wc = P.WALLCAB, z0 = M(wc.y), z1 = M(wc.y + wc.h), gap0 = hobZ - hw / 2 - 0.01, gap1 = hobZ + hw / 2 + 0.01, wx = M(wc.x + wc.w / 2), ww = M(wc.w);
+    const wc = P.WALLCAB, z0 = M(wc.y) + (P.DRYER && !S.dryerUnder ? 0.025 : 0), z1 = M(wc.y + wc.h), gap0 = hobZ - hw / 2 - 0.01, gap1 = hobZ + hw / 2 + 0.01, wx = M(wc.x + wc.w / 2), ww = M(wc.w);
     const wcab = (za, zb, y0, y1) => { if (zb - za < 0.05) return; box(ww, y1 - y0, zb - za, MAT.white, wx, (y0 + y1) / 2, (za + zb) / 2, kit);
       const n = Math.max(1, Math.round((zb - za) / 0.45)); for (let i = 0; i < n; i++) { const sg = (zb - za) / n; box(0.018, y1 - y0 - 0.004, sg - 0.004, MAT.kitDoor, M(wc.x) - 0.009, (y0 + y1) / 2, za + sg * (i + 0.5), kit, false); } };
     wcab(z0, Math.max(z0, gap0), 1.5, H - 0.01); wcab(Math.min(z1, gap1), z1, 1.5, H - 0.01); wcab(Math.max(z0, gap0), Math.min(z1, gap1), hb + hh + 0.02, H - 0.01);
     box(0.02, 0.02, Math.max(0, gap0 - z0) - 0.04, MAT.led, M(wc.x) + 0.02, 1.49, (z0 + gap0) / 2, kit, false);
   } else { const wc = P.WALLCAB; box(M(wc.w), 0.7, M(wc.h), MAT.white, M(wc.x + wc.w / 2), 1.85, M(wc.y + wc.h / 2), kit); }
+  // 舊陽台位（照相估）：窗邊角落兩條直落去水喉、天花橫喉、煤氣錶同煤氣喉
+  {
+    const pvc = new THREE.MeshStandardMaterial({ color: 0xe9e6dc, roughness: 0.6 }), gi = new THREE.MeshStandardMaterial({ color: 0x9da1a5, roughness: 0.4, metalness: 0.7 });
+    const zW = M(KY - RUN) - 0.06, xL = M(438 + 6) + 0.06, xR = M(KX);
+    for (const dx of [0, 0.13]) cyl(0.055, 0.055, H, pvc, xL + dx, H / 2, zW + 0.02, kit, 16);                                 // 直落去水喉
+    const hp = cyl(0.035, 0.035, xR - xL, pvc, (xL + xR) / 2, H - 0.12, zW + 0.12, kit, 12); hp.rotation.z = Math.PI / 2;     // 天花橫喉
+    const gp = cyl(0.012, 0.012, xR - xL, gi, (xL + xR) / 2, H - 0.2, zW + 0.05, kit, 8); gp.rotation.z = Math.PI / 2;        // 煤氣喉
+    box(0.13, 0.2, 0.17, new THREE.MeshStandardMaterial({ color: 0xbfc3c4, roughness: 0.5, metalness: 0.3 }), xR - 0.08, 2.05, zW + 0.12, kit);  // 煤氣錶
+    box(0.004, 0.04, 0.06, MAT.led, xR - 0.146, 2.08, zW + 0.12, kit, false);
+    const gv = cyl(0.012, 0.012, 0.5, gi, xR - 0.08, 2.35, zW + 0.12, kit, 8);
+  }
+  // 乾衣機：Miele TED645WP 9kg（850 高 × 596 闊 × 636 深，53kg），吊喺櫃桶櫃上面，承托層板＋兩邊側板，頂部矮櫃到天花
+  if (P.DRYER) {
+    const under = !!S.dryerUnder, dr = P.DRYER, dz = M(dr.y + dr.h / 2), bx = M(KX), dd = 0.636, dw = 0.596, dh = 0.85, y0 = under ? 0.0 : 1.47, t = 0.025;
+    const lotus = new THREE.MeshStandardMaterial({ color: 0xf4f2ee, roughness: 0.35 }), graphite = new THREE.MeshPhysicalMaterial({ color: 0x4a4c50, roughness: 0.25, metalness: 0.5, clearcoat: 0.6 });
+    // 狗臂架：兩支黑色鋼 L 架鎖入石屎牆＋承托板＋防震腳墊；周圍唔做吊櫃（枱底模式就唔要）
+    if (!under) {
+    const steel = new THREE.MeshStandardMaterial({ color: 0x222326, roughness: 0.5, metalness: 0.7 });
+    box(dd + 0.02, 0.018, dw + 0.02, MAT.kitDoor, bx - (dd + 0.02) / 2, y0 - 0.009, dz, kit);                          // 承托板
+    for (const sz of [-1, 1]) { const zz = dz + sz * (dw / 2 - 0.08);
+      box(dd, 0.04, 0.035, steel, bx - dd / 2, y0 - 0.038, zz, kit);                                                   // 橫臂
+      box(0.035, 0.32, 0.035, steel, bx - 0.018, y0 - 0.058 - 0.16, zz, kit);                                          // 貼牆直臂
+      const br = box(0.03, Math.hypot(dd * 0.7, 0.3), 0.03, steel, bx - dd * 0.35, y0 - 0.058 - 0.15, zz, kit); br.rotation.z = Math.atan2(dd * 0.7, 0.3);   // 斜撐
+    }
+    for (const [ax, az] of [[-0.08, -1], [-0.08, 1], [-dd + 0.08, -1], [-dd + 0.08, 1]]) cyl(0.025, 0.025, 0.012, MAT.black, bx + ax, y0 + 0.006, dz + az * (dw / 2 - 0.06), kit, 16);   // 防震腳墊
+    }
+    // 機身
+    rbox(dd - 0.01, dh, dw, 0.015, lotus, bx - dd / 2 - 0.005, y0 + 0.012 + dh / 2, dz, kit);
+    const fx = bx - dd;
+    box(0.012, 0.12, dw - 0.01, lotus, fx - 0.004, y0 + dh - 0.07, dz, kit);                                              // 直式控制面板
+    const knob = cyl(0.032, 0.032, 0.025, lotus, fx - 0.018, y0 + dh - 0.07, dz + dw / 2 - 0.09, kit, 24); knob.rotation.z = Math.PI / 2;
+    box(0.004, 0.035, 0.2, MAT.black, fx - 0.011, y0 + dh - 0.07, dz - 0.02, kit, false);                                 // 顯示屏
+    box(0.003, 0.012, 0.06, MAT.white, fx - 0.0135, y0 + dh - 0.07, dz - 0.02, kit, false);
+    const cy2 = y0 + 0.4;
+    const ring = cyl(0.215, 0.215, 0.035, graphite, fx - 0.02, cy2, dz, kit, 40); ring.rotation.z = Math.PI / 2;           // 石墨灰門
+    const gl2 = cyl(0.16, 0.16, 0.04, MAT.blackGlass, fx - 0.024, cy2, dz, kit, 40); gl2.rotation.z = Math.PI / 2;
+    box(0.012, 0.09, 0.02, graphite, fx - 0.04, cy2, dz + 0.2, kit, false);
+    box(0.004, 0.05, 0.12, new THREE.MeshStandardMaterial({ color: 0xe8e6e1 }), fx - 0.004, y0 + 0.07, dz - dw / 2 + 0.1, kit, false);   // 冷凝水盒
+  }
 
   // furniture
   const items = S.items;
   for (const it of items) {
     if (it.k === 'wardL') { for (const r of P.rectsOf(it)) { const g = makeItem({ ...it, k: 'ward', w: r.w, d: r.h }); g.position.set(M(r.x + r.w / 2), 0, M(r.y + r.h / 2)); world.add(g); } continue; }
     const b = P.bbox(it); const g = makeItem(it);
-    g.position.set(M(b.x + b.w / 2), 0, M(b.y + b.h / 2)); g.rotation.y = -it.rot * Math.PI / 180; world.add(g);
+    const plat = it.k === 'wash' ? 0.08 : 0;   // 照相估：洗衣機地台約 8cm
+    if (plat) box(M(b.w) + 0.04, plat, M(b.h) + 0.06, new THREE.MeshStandardMaterial({ color: 0x9a9890, roughness: 0.9 }), M(b.x + b.w / 2), plat / 2, M(b.y + b.h / 2) , world);
+    g.position.set(M(b.x + b.w / 2), plat, M(b.y + b.h / 2)); g.rotation.y = -it.rot * Math.PI / 180; world.add(g);
   }
   // 客廳地氈：梳化前面
   const sofa = items.find(i => i.k === 'sofa');
@@ -846,7 +988,7 @@ function build() {
   }
 
   // 天花：純白 SF0000M + 筒燈
-  ceilingGroup = new THREE.Group(); world.add(ceilingGroup); ceilingGroup.add(corridor);
+  ceilingGroup = new THREE.Group(); world.add(ceilingGroup); ceilingGroup.add(corridor); ceilingGroup.visible = false;   // 永遠唔封頂
   for (const f of P.FLOORS) {
     const geo = new THREE.PlaneGeometry(M(f.w) + 0.2, M(f.h) + 0.2); geo.rotateX(Math.PI / 2);
     const m = new THREE.Mesh(geo, MAT.ceilWhite); m.position.set(M(f.x + f.w / 2), H, M(f.y + f.h / 2)); ceilingGroup.add(m);
@@ -859,8 +1001,8 @@ function build() {
   dl(M(105), M(520)); dl(M(320), M(520));
 
   // lights
-  scene.add(new THREE.HemisphereLight(0xfffaf2, 0x8a8070, 0.45));
-  const sun = new THREE.DirectionalLight(0xfff1dc, 1.7);
+  HEMI = new THREE.HemisphereLight(0xfffaf2, 0x8a8070, 0.45); scene.add(HEMI);
+  const sun = new THREE.DirectionalLight(0xfff1dc, 1.7); SUN = sun;
   sun.position.set(M((minX + maxX) / 2) - 3, 7, M(maxZ) + 6);
   sun.target.position.set(M((minX + maxX) / 2), 0, M((minZ + maxZ) / 2));
   sun.castShadow = true; sun.shadow.mapSize.set(2048, 2048); sun.shadow.bias = -0.0004; sun.shadow.normalBias = 0.02;
@@ -902,7 +1044,7 @@ const VIEWS = {
 let anim = null;
 function go(name) {
   const v = VIEWS[name]();
-  ceilingGroup.visible = name !== 'doll';
+  ceilingGroup.visible = false;
   CUT = name === 'doll'; applyCut();
   controls.minDistance = name === 'doll' ? 2 : 0.05;
   controls.maxPolarAngle = name === 'doll' ? Math.PI * 0.48 : Math.PI * 0.95;
@@ -936,7 +1078,7 @@ function open3D() {
       window.addEventListener('resize', () => { if (!$('v3d').hidden) resize(); });
     }
     if (scene) scene.traverse(o => { if (o.geometry) o.geometry.dispose(); });
-    bounds = build(); applyDoors(); applyCut(); resize();
+    bounds = build(); applyDoors(); applyBed(); applyCut(); applyXray(); applyLights(); resize();
     const v = VIEWS.living(); camera.position.set(...v.p); controls.target.set(...v.t); go('living');
     $('v3load').style.display = 'none';
     cancelAnimationFrame(raf); raf = requestAnimationFrame(loop);
@@ -946,8 +1088,17 @@ function close3D() { $('v3d').hidden = true; cancelAnimationFrame(raf); }
 
 $('b3d').onclick = open3D;
 $('v3close').onclick = close3D;
-$('v3cut').onclick = () => { CUT = !CUT; applyCut(); if (CUT) ceilingGroup.visible = false; };
+$('v3cut').onclick = () => { CUT = !CUT; applyCut(); ceilingGroup.visible = false; };
 $('v3doors').onclick = () => { DOORS_OPEN = !DOORS_OPEN; applyDoors(); $('v3doors').classList.toggle('on', DOORS_OPEN); $('v3doors').textContent = DOORS_OPEN ? '關櫃門' : '開櫃門'; };
 document.querySelectorAll('#v3dbar .v3b[data-v]').forEach(b => b.onclick = () => go(b.dataset.v));
 window.__open3D = open3D;
-window.__v3cam = (px, py, pz, tx, ty, tz) => { anim = null; camera.position.set(px, py, pz); controls.target.set(tx, ty, tz); ceilingGroup.visible = !CUT; };
+function rebuild3D() { const cp = camera.position.clone(), ct = controls.target.clone(); scene.traverse(o => { if (o.geometry) o.geometry.dispose(); });
+  bounds = build(); applyDoors(); applyBed(); applyCut(); applyXray(); applyLights(); camera.position.copy(cp); controls.target.copy(ct); }
+function syncDryerBtn() { const st = window.__plan && window.__plan.state(); if ($('v3dryer')) { $('v3dryer').textContent = st && st.dryerUnder ? '乾衣機：枱底' : '乾衣機：吊高'; $('v3dryer').classList.toggle('on', !!(st && st.dryerUnder)); } }
+if ($('v3dryer')) $('v3dryer').onclick = () => { const st = window.__plan.state(); window.__setDryerUnder(!st.dryerUnder); rebuild3D(); syncDryerBtn(); };
+$('b3d').addEventListener('click', () => setTimeout(syncDryerBtn, 50));
+if ($('v3night')) $('v3night').onclick = () => { NIGHT = !NIGHT; applyLights(); $('v3night').textContent = NIGHT ? '☀️ 日頭' : '🌙 夜晚'; $('v3night').classList.toggle('on', NIGHT); };
+if ($('v3light')) $('v3light').onclick = () => { LIGHTS_ON = !LIGHTS_ON; applyLights(); $('v3light').textContent = LIGHTS_ON ? '💡 閂燈' : '💡 開燈'; $('v3light').classList.toggle('on', !LIGHTS_ON); };
+if ($('v3xray')) $('v3xray').onclick = () => { XRAY = !XRAY; applyXray(); $('v3xray').classList.toggle('on', XRAY); };
+if ($('v3bed')) $('v3bed').onclick = () => { BED_OPEN = !BED_OPEN; applyBed(); $('v3bed').classList.toggle('on', BED_OPEN); $('v3bed').textContent = BED_OPEN ? '收返床' : '睇床底'; };
+window.__v3cam = (px, py, pz, tx, ty, tz) => { anim = null; camera.position.set(px, py, pz); controls.target.set(tx, ty, tz); ceilingGroup.visible = false; };
